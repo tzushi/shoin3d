@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="世田谷・松陰神社の境内をBlenderで再現した3Dモデルのビューア">
+<title>松陰神社 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500&display=swap">
+<style>
+/* Layout: the 3D precinct fills the screen; a washi-paper nameplate sits top-left, viewpoint tabs ride the bottom edge. */
+:root {
+  --paper: #f3f0e8;        /* washi */
+  --paper-2: #e6e1d4;
+  --ink: #1d1a16;          /* sumi */
+  --ink-soft: #5a544a;
+  --patina: #4f6b5f;       /* copper-roof patina, accent */
+  --patina-ink: #f3f0e8;
+  --line: rgba(29,26,22,.16);
+  --scrim: rgba(243,240,232,.86);
+  --font-display: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1c1b18; --paper-2: #2a2824; --ink: #ece7db; --ink-soft: #b3ab9b;
+    --patina: #8fb3a2; --patina-ink: #13201b; --line: rgba(236,231,219,.16); --scrim: rgba(28,27,24,.84);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1c1b18; --paper-2: #2a2824; --ink: #ece7db; --ink-soft: #b3ab9b;
+  --patina: #8fb3a2; --patina-ink: #13201b; --line: rgba(236,231,219,.16); --scrim: rgba(28,27,24,.84);
+  color-scheme: dark;
+}
+html, body { height: 100%; margin: 0; }
+body { background: #b9c6cf; color: var(--ink); font-family: var(--font-body); overflow: hidden; }
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+
+.plate {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  left: max(16px, env(safe-area-inset-left, 0px));
+  max-width: min(340px, calc(100vw - 32px));
+  background: var(--scrim);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 14px 16px 12px;
+  display: grid; gap: 6px;
+}
+.plate .kicker { font-size: 11px; letter-spacing: .14em; color: var(--ink-soft); }
+.plate h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 28px; line-height: 1.15; letter-spacing: .06em; text-wrap: balance; }
+.plate h1 small { font-size: 13px; font-weight: 500; letter-spacing: .1em; color: var(--ink-soft); margin-left: 6px; }
+.plate p { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--ink-soft); }
+.plate details { font-size: 12.5px; line-height: 1.7; }
+.plate summary { cursor: pointer; color: var(--patina); font-weight: 500; list-style: none; }
+.plate summary::-webkit-details-marker { display: none; }
+.plate summary::before { content: "＋ "; }
+.plate details[open] summary::before { content: "－ "; }
+.plate ul { margin: 6px 0 0; padding-left: 1.1em; color: var(--ink-soft); display: grid; gap: 2px; }
+
+.views {
+  position: fixed; left: 0; right: 0;
+  bottom: 0;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; justify-content: center; pointer-events: none;
+}
+.views .bar {
+  pointer-events: auto;
+  display: flex; gap: 4px; flex-wrap: wrap; justify-content: center;
+  background: var(--scrim);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px;
+  max-width: 100%;
+}
+.views button {
+  font: 500 13px/1 var(--font-body); color: var(--ink);
+  background: transparent; border: 0; border-radius: 999px;
+  padding: 9px 14px; cursor: pointer; letter-spacing: .04em;
+}
+.views button:hover { background: var(--paper-2); }
+.views button[aria-pressed="true"] { background: var(--patina); color: var(--patina-ink); }
+.views button:focus-visible, .plate summary:focus-visible { outline: 2px solid var(--patina); outline-offset: 2px; }
+
+.hint {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  right: max(16px, env(safe-area-inset-right, 0px));
+  font-size: 11.5px; color: var(--ink-soft);
+  background: var(--scrim); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px;
+}
+@media (max-width: 640px) { .hint { display: none; } .plate h1 { font-size: 24px; } }
+
+#loader {
+  position: fixed; inset: 0; display: grid; place-items: center;
+  background: var(--paper); z-index: 5; transition: opacity .6s ease;
+}
+#loader .box { display: grid; gap: 14px; justify-items: center; padding-inline: 24px; text-align: center; }
+#loader .mark { font-family: var(--font-display); font-size: 22px; letter-spacing: .3em; }
+#loader .meter { width: min(260px, 70vw); height: 2px; background: var(--line); overflow: hidden; }
+#loader .meter i { display: block; height: 100%; width: 0%; background: var(--patina); transition: width .2s; }
+#loader .status { font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+#loader.done { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { #loader, #loader .meter i { transition: none; } }
+</style>
+</head>
+<body>
+<div id="stage" aria-label="松陰神社の3Dモデル。ドラッグで回転、ホイールやピンチでズームできます。"></div>
+
+<section class="plate">
+  <div class="kicker">東京都世田谷区若林4丁目</div>
+  <h1>松陰神社<small>3D</small></h1>
+  <p>吉田松陰を祀る神社の境内を、写真をもとにBlenderで再現した模型です。</p>
+  <details id="about">
+    <summary>境内のつくり</summary>
+    <ul>
+      <li>入口の石の明神鳥居と、参道奥の黒い二の鳥居</li>
+      <li>参道の両脇に並ぶ32基の石灯籠</li>
+      <li>銅板葺き入母屋屋根の拝殿(昭和2〜3年造営)と白い神幕</li>
+      <li>萩の松下村塾を模した建物、手水舎</li>
+    </ul>
+    <p style="margin-top:6px">寸法と配置は写真からの概算です。神紋は簡略化した図案にしています。</p>
+  </details>
+</section>
+
+<div class="hint">ドラッグで回転 ・ 右ドラッグで移動 ・ ホイールでズーム</div>
+
+<nav class="views" aria-label="視点">
+  <div class="bar" id="viewbar"></div>
+</nav>
+
+<div id="loader" role="status" aria-live="polite">
+  <div class="box">
+    <div class="mark">松陰神社</div>
+    <div class="meter"><i id="meter"></i></div>
+    <div class="status" id="status">3Dデータを読み込み中…</div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { Sky } from "three/addons/objects/Sky.js";
+
+const MODEL_URL = "models/shoin.glb";
+const stage = document.getElementById("stage");
+const meter = document.getElementById("meter");
+const statusEl = document.getElementById("status");
+const loaderEl = document.getElementById("loader");
+
+// Blender (Z-up) -> three (Y-up)
+const B = (x, y, z) => new THREE.Vector3(x, z, -y);
+
+const VIEWS = [
+  { id: "gate",   label: "一の鳥居", pos: B(1.5, -46, 1.7),  tgt: B(0, 20, 3.5) },
+  { id: "sando",  label: "参道",     pos: B(1.2, -9, 1.7),   tgt: B(0, 40, 4.6) },
+  { id: "haiden", label: "拝殿",     pos: B(-4.5, 16, 1.7),  tgt: B(0.5, 40, 4.6) },
+  { id: "juku",   label: "松下村塾", pos: B(-4.5, 4, 1.8),   tgt: B(-15, 14, 2.0) },
+  { id: "aerial", label: "俯瞰",     pos: B(-26, -38, 48),   tgt: B(0, 16, 0) },
+];
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.AgXToneMapping;
+renderer.toneMappingExposure = 0.82;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xc4cfd6, 70, 260);
+
+const camera = new THREE.PerspectiveCamera(42, stage.clientWidth / stage.clientHeight, 0.1, 1200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.minDistance = 1.5;
+controls.maxDistance = 160;
+controls.screenSpacePanning = false;
+
+// Sky + sun, same direction as the Blender sun (elevation 38°)
+const sky = new Sky();
+sky.scale.setScalar(4000);
+const su = sky.material.uniforms;
+su.turbidity.value = 4.5; su.rayleigh.value = 1.4; su.mieCoefficient.value = 0.006; su.mieDirectionalG.value = 0.82;
+// Direction toward the sun, taken from the Blender sun lamp (elevation 38°, behind the approach)
+const sunDir = B(-0.452, -0.645, 0.616).normalize();
+su.sunPosition.value.copy(sunDir);
+scene.add(sky);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+const skyScene = new THREE.Scene(); const sky2 = sky.clone(); skyScene.add(sky2);
+scene.environment = pmrem.fromScene(skyScene, 0, 0.1, 4000).texture;
+scene.environmentIntensity = 0.35;
+
+const hemi = new THREE.HemisphereLight(0xdfe8f0, 0x3a352b, 0.35);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff0dc, 3.2);
+sun.position.copy(sunDir).multiplyScalar(120).add(B(0, 10, 0));
+sun.target.position.copy(B(0, 10, 0));
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+const sc = sun.shadow.camera;
+sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 10; sc.far = 300;
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
+scene.add(sun, sun.target);
+
+// Viewpoint tabs
+const bar = document.getElementById("viewbar");
+let flight = null;
+function goTo(v, instant = false) {
+  [...bar.children].forEach(b => b.setAttribute("aria-pressed", String(b.dataset.id === v.id)));
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (instant || reduce) {
+    camera.position.copy(v.pos); controls.target.copy(v.tgt); controls.update(); flight = null; return;
+  }
+  flight = { t: 0, p0: camera.position.clone(), t0: controls.target.clone(), p1: v.pos.clone(), t1: v.tgt.clone() };
+}
+for (const v of VIEWS) {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = v.label; b.dataset.id = v.id; b.id = "view-" + v.id;
+  b.setAttribute("aria-pressed", "false");
+  b.addEventListener("click", () => goTo(v));
+  bar.appendChild(b);
+}
+controls.addEventListener("start", () => { flight = null; [...bar.children].forEach(b => b.setAttribute("aria-pressed", "false")); });
+const startView = VIEWS.find(v => v.id === location.hash.slice(1)) || VIEWS[1];
+goTo(startView, true);
+
+// Load model
+const loader = new GLTFLoader();
+function onModel(gltf) {
+  const root = gltf.scene;
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = true;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.some(m => /Leaf|Foliage/i.test(m.name || ""))) {
+      // soften the faceted, decimated crowns
+      smoothNormals(o.geometry);
+    }
+    for (const m of mats) {
+      for (const k of ["map", "normalMap", "roughnessMap"]) if (m[k]) m[k].anisotropy = Math.min(8, maxAniso);
+      if (m.name && /Ground|Gravel/i.test(m.name)) o.castShadow = false;
+    }
+  });
+  scene.add(root);
+  statusEl.textContent = "表示を準備中…";
+  renderer.compileAsync ? renderer.compileAsync(scene, camera).then(finish) : finish();
+}
+function onFail(err) {
+  console.error(err);
+  statusEl.textContent = "3Dデータを読み込めませんでした。ページを再読み込みしてください。";
+}
+function showProgress(loaded, total) {
+  const mb = (n) => (n / 1048576).toFixed(1);
+  if (total) {
+    meter.style.width = (100 * loaded / total).toFixed(0) + "%";
+    statusEl.textContent = `3Dデータを読み込み中… ${mb(loaded)} / ${mb(total)} MB`;
+  } else {
+    statusEl.textContent = `3Dデータを読み込み中… ${mb(loaded)} MB`;
+  }
+}
+loader.load(MODEL_URL, onModel, (e) => showProgress(e.loaded, e.total), onFail);
+// Average normals of vertices that share a position (works on quantized/interleaved data)
+function smoothNormals(g) {
+  const pos = g.attributes.position, n = pos.count, idx = g.index;
+  const acc = new Map(), key = new Array(n);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), cb = new THREE.Vector3(), ab = new THREE.Vector3();
+  for (let i = 0; i < n; i++) key[i] = `${Math.round(pos.getX(i) * 100)},${Math.round(pos.getY(i) * 100)},${Math.round(pos.getZ(i) * 100)}`;
+  const tri = idx ? idx.count / 3 : n / 3;
+  for (let t = 0; t < tri; t++) {
+    const i0 = idx ? idx.getX(3 * t) : 3 * t, i1 = idx ? idx.getX(3 * t + 1) : 3 * t + 1, i2 = idx ? idx.getX(3 * t + 2) : 3 * t + 2;
+    a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2);
+    cb.subVectors(c, b); ab.subVectors(a, b); cb.cross(ab);
+    for (const i of [i0, i1, i2]) {
+      const v = acc.get(key[i]);
+      if (v) v.add(cb); else acc.set(key[i], cb.clone());
+    }
+  }
+  const out = new Float32Array(n * 3), v = new THREE.Vector3();
+  for (let i = 0; i < n; i++) { v.copy(acc.get(key[i])).normalize(); out[3 * i] = v.x; out[3 * i + 1] = v.y; out[3 * i + 2] = v.z; }
+  g.setAttribute("normal", new THREE.BufferAttribute(out, 3));
+}
+function finish() { meter.style.width = "100%"; loaderEl.classList.add("done"); }
+
+// Loop
+const clock = new THREE.Clock();
+const ease = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (flight) {
+    flight.t = Math.min(1, flight.t + dt / 1.6);
+    const k = ease(flight.t);
+    camera.position.lerpVectors(flight.p0, flight.p1, k);
+    controls.target.lerpVectors(flight.t0, flight.t1, k);
+    if (flight.t >= 1) flight = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+new ResizeObserver(() => {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}).observe(stage);
+</script>
+</body>
+</html>
